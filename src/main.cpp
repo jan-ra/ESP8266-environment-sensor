@@ -5,25 +5,40 @@
 #include <WiFiClientSecureBearSSL.h>
 #include <ArduinoJson.h>
 #include "./credentials.h"
+#include "./counter_functions.h"
+#include <set>
+#include <string>
 
-String serverName = "https://timeapi.io/api/Time/current/zone?timeZone=";
-unsigned long timerDelay = 5000;
+// CONSTANTS
+#define disable 0
+#define enable 1
+#define PURGETIME 60000
+
+// VARIABLES
+String timeServer = "https://timeapi.io/api/Time/current/zone?timeZone=Europe/Amsterdam";
 unsigned long lastTime = 0;
-
 unsigned long setTime = 0;
-int hours = 0;
-int minutes = 0;
-int seconds = 0;
+unsigned int hours = 0;
+unsigned int minutes = 0;
+unsigned int seconds = 0;
+unsigned int channel = 1;
+int clients_known_count_old;
 
+// FUNCTIONS
 String getTime();
+String outputDevices();
 void log(String text);
 void writeToSD(String filePath, String text);
+void showDevices();
+void writeData(String text);
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
+
   delay(10);
   StaticJsonDocument<500> doc;
+
   Serial.println('\n');
   Serial.println("Initializing SD cards");
 
@@ -55,7 +70,7 @@ void setup()
   {
 
     HTTPClient http;
-    String serverPath = serverName + "Europe/Amsterdam";
+    String serverPath = timeServer;
     std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
     client->setInsecure();
     http.begin(*client, serverPath.c_str());
@@ -73,8 +88,8 @@ void setup()
       // Test if parsing succeeds.
       if (error)
       {
-        Serial.print(F("deserializeJson() failed: "));
-        Serial.println(error.f_str());
+        log(F("deserializeJson() failed: "));
+        log(error.f_str());
         return;
       }
 
@@ -91,12 +106,46 @@ void setup()
     }
     http.end();
   }
+
+  log("Setting up Wifi Monitor");
+  delay(10);
+  wifi_set_opmode(STATION_MODE); // Promiscuous works only with station mode
+  wifi_set_channel(channel);
+  delay(10);
+  wifi_promiscuous_enable(disable);
+  wifi_set_promiscuous_rx_cb(promisc_cb); // Set up promiscuous callback
+  delay(10);
+  wifi_promiscuous_enable(enable);
 }
 
 void loop()
 {
-  log(getTime());
-  delay(2000);
+  channel = 1;
+  wifi_set_channel(channel);
+  while (true)
+  {
+    nothing_new++; // Array is not finite, check bounds and adjust if required
+    if (nothing_new > 200)
+    { // monitor channel for 200 ms
+      nothing_new = 0;
+      channel++;
+      if (channel == 15)
+        break; // Only scan channels 1 to 14
+      wifi_set_channel(channel);
+    }
+    delay(1); // critical processing timeslice for NONOS SDK! No delay(0) yield()
+
+    if (clients_known_count > clients_known_count_old)
+    {
+      clients_known_count_old = clients_known_count;
+    }
+    if (millis() % 10000 == 0)
+    {
+      writeData(outputDevices());
+      log("wrote data -> " + outputDevices());
+    }
+  }
+  void purgeDevice();
 }
 
 String getTime()
@@ -123,6 +172,13 @@ void log(String text)
   writeToSD("LOG.txt", logText);
 }
 
+void writeData(String text)
+{
+  const String dataText = getTime() + "," + text;
+  Serial.println(dataText);
+  writeToSD("data.txt", dataText);
+}
+
 void writeToSD(String filePath, String text)
 {
   File dataFile = SD.open(filePath, FILE_WRITE);
@@ -135,4 +191,45 @@ void writeToSD(String filePath, String text)
   {
     Serial.println("Error while opening SD Card file");
   }
+}
+
+void purgeDevice()
+{
+  for (int u = 0; u < clients_known_count; u++)
+  {
+    if ((millis() - clients_known[u].lastDiscoveredTime) > PURGETIME)
+    {
+      Serial.print("purge Client");
+      Serial.println(u);
+      for (int i = u; i < clients_known_count; i++)
+        memcpy(&clients_known[i], &clients_known[i + 1], sizeof(clients_known[i]));
+      clients_known_count--;
+      break;
+    }
+  }
+}
+
+String outputDevices()
+{
+  int strong = 0;
+  int medium = 0;
+  int weak = 0;
+  // show Clients
+  for (int u = 0; u < clients_known_count; u++)
+  {
+    if (clients_known[u].rssi >= -50)
+    {
+      strong++;
+    }
+    else if (clients_known[u].rssi >= -70)
+    {
+      medium++;
+    }
+    else
+    {
+      weak++;
+    }
+  }
+  String out = String(strong) + "," + String(medium) + "," + String(weak);
+  return out;
 }
