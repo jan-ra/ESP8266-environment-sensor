@@ -4,6 +4,8 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecureBearSSL.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <BH1750.h>
 #include "./credentials.h"
 #include "./counter_functions.h"
 #include <set>
@@ -12,7 +14,9 @@
 // CONSTANTS
 #define disable 0
 #define enable 1
-#define PURGETIME 60000
+#define PURGETIME 300000
+#define SAMPLERATE 60000
+#define LED D0
 
 // VARIABLES
 String timeServer = "https://timeapi.io/api/Time/current/zone?timeZone=Europe/Amsterdam";
@@ -22,7 +26,10 @@ unsigned int hours = 0;
 unsigned int minutes = 0;
 unsigned int seconds = 0;
 unsigned int channel = 1;
+unsigned int ledstatus = true;
+unsigned int lastLEDon = true;
 int clients_known_count_old;
+BH1750 lightMeter;
 
 // FUNCTIONS
 String getTime();
@@ -31,14 +38,16 @@ void log(String text);
 void writeToSD(String filePath, String text);
 void showDevices();
 void writeData(String text);
+void purgeDevice();
 
 void setup()
 {
   Serial.begin(115200);
-
+  Wire.begin(D2, D1);
   delay(10);
   StaticJsonDocument<500> doc;
-
+  pinMode(LED, OUTPUT);
+  lightMeter.begin();
   Serial.println('\n');
   Serial.println("Initializing SD cards");
 
@@ -55,8 +64,16 @@ void setup()
   WiFi.begin(ssid, password);
   int i = 0;
   while (WiFi.status() != WL_CONNECTED)
-  { // Wait for the Wi-Fi to connect
+  {
     delay(1000);
+    if (i % 2 == 0)
+    {
+      digitalWrite(LED, LOW);
+    }
+    else
+    {
+      digitalWrite(LED, HIGH);
+    }
     Serial.print(++i);
     Serial.print(' ');
   }
@@ -68,26 +85,22 @@ void setup()
   log("Pulling current time");
   if (WiFi.status() == WL_CONNECTED)
   {
-
     HTTPClient http;
     String serverPath = timeServer;
     std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
     client->setInsecure();
     http.begin(*client, serverPath.c_str());
     int httpResponseCode = http.GET();
-
     if (httpResponseCode > 0)
     {
       Serial.print("HTTP Response code: ");
       Serial.println(httpResponseCode);
       String payload = http.getString();
-      Serial.println(payload);
-
       DeserializationError error = deserializeJson(doc, payload);
 
-      // Test if parsing succeeds.
       if (error)
       {
+        digitalWrite(LED, LOW);
         log(F("deserializeJson() failed: "));
         log(error.f_str());
         return;
@@ -103,6 +116,7 @@ void setup()
     {
       Serial.print("Error code: ");
       Serial.println(httpResponseCode);
+      digitalWrite(LED, LOW);
     }
     http.end();
   }
@@ -116,6 +130,7 @@ void setup()
   wifi_set_promiscuous_rx_cb(promisc_cb); // Set up promiscuous callback
   delay(10);
   wifi_promiscuous_enable(enable);
+  digitalWrite(LED, HIGH);
 }
 
 void loop()
@@ -139,13 +154,26 @@ void loop()
     {
       clients_known_count_old = clients_known_count;
     }
-    if (millis() % 10000 == 0)
+    if (millis() % SAMPLERATE == 0)
     {
-      writeData(outputDevices());
-      log("wrote data -> " + outputDevices());
+      float lux = lightMeter.readLightLevel();
+      Serial.print("Light: ");
+      Serial.print(lux);
+      Serial.println(" lx");
+      writeData(outputDevices() + "," + String(lux));
+      log("wrote data -> " + outputDevices() + "," + String(lux));
+    }
+    if (millis() % 5000 == 0)
+    {
+      digitalWrite(LED, LOW);
+      lastLEDon = millis();
+    }
+    if (millis() == lastLEDon + 100)
+    {
+      digitalWrite(LED, HIGH);
     }
   }
-  void purgeDevice();
+  purgeDevice();
 }
 
 String getTime()
@@ -175,7 +203,6 @@ void log(String text)
 void writeData(String text)
 {
   const String dataText = getTime() + "," + text;
-  Serial.println(dataText);
   writeToSD("data.txt", dataText);
 }
 
