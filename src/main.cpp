@@ -235,8 +235,6 @@ void purgeDevice()
   {
     if ((millis() - clients_known[u].lastDiscoveredTime) > PURGETIME)
     {
-      Serial.print("purge Client");
-      Serial.println(u);
       for (int i = u; i < clients_known_count; i++)
         memcpy(&clients_known[i], &clients_known[i + 1], sizeof(clients_known[i]));
       clients_known_count--;
@@ -298,10 +296,6 @@ float measureSound()
 
   // Calculate the decibel value using the peak-to-peak voltage
   float dB = 20 * log10(peakToPeakVoltage / Vref) + calibrationValue;
-
-  // Print the decibel value
-  Serial.print("Decibel value: ");
-  Serial.println(dB, 2);
 
   return dB;
 }
