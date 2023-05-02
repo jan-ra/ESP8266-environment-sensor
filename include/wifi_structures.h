@@ -1,5 +1,4 @@
 #include <Arduino.h>
-// This-->tab == "structures.h"
 #define ETH_MAC_LEN 6
 
 uint8_t broadcast1[3] = {0x01, 0x00, 0x5e};
