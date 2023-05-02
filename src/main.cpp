@@ -7,68 +7,72 @@
 #include <Wire.h>
 #include <BH1750.h>
 #include "./credentials.h"
-#include "./counter_functions.h"
-#include <set>
-#include <string>
+#include "./wifi_functions.h"
 
-// CONSTANTS
 #define disable 0
 #define enable 1
-#define PURGETIME 300000
+#define DEVICEPURGETIME 300000
 #define SAMPLERATE 60000
-#define LED D0
+#define SOUNDMEASUREINTERVAl 1000
+
+// PINS
+#define LED_PIN D0
 #define AUDIO_SENSOR_PIN A0
+#define LIGHT_SENSOR_SCL D1
+#define LIGHT_SENSOR_SDA D2
+#define SD_DATA_PIN D8
 
 // VARIABLES
-String timeServer = "https://timeapi.io/api/Time/current/zone?timeZone=Europe/Amsterdam";
-unsigned long lastTime = 0;
+const int ADC_RESOLUTION = 1024;
+const float Vref = 3.3;
+const float soundCalibration = 65.0;
+
 unsigned long setTime = 0;
+unsigned long soundSampleStart;
+unsigned long lastSampleTime = 0;
 unsigned int hours = 0;
 unsigned int minutes = 0;
 unsigned int seconds = 0;
 unsigned int channel = 1;
 unsigned int ledstatus = true;
 unsigned int lastLEDon = true;
-const int sampleWindow = 50;
-const float Vref = 3.3;
-const int ADC_RESOLUTION = 1024;
-unsigned long lastSampleTime = 0;
+
+int deviceCount[3] = {0, 0, 0};
 int maxVoltage = 0;
 int minVoltage = ADC_RESOLUTION;
-const float calibrationValue = 65.0;
-unsigned int soundSampleStart;
-unsigned int sample;
-int db;
-int clients_known_count_old;
-const int soundmeasurementInterval = 1000;
-BH1750 lightMeter;
 
-// FUNCTIONS
+String timeServer = "https://timeapi.io/api/Time/current/zone?timeZone=Europe/Amsterdam";
+
+BH1750 lightMeter;
+StaticJsonDocument<500> doc;
+HTTPClient http;
+std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
+
+// FUNCTIONS (inital listing needed for platformIO conversion for ESP8266)
 String getTime();
 String outputDevices();
 void log(String text);
 void writeToSD(String filePath, String text);
 void showDevices();
 void writeData(String text);
-void purgeDevice();
+void purgeDevices();
 float measureSound();
+void beginWifiCallback();
+void pullCurrentTime();
 
 void setup()
 {
   Serial.begin(115200);
 
-  Wire.begin(D2, D1);
-  pinMode(LED, OUTPUT);
+  Wire.begin(LIGHT_SENSOR_SDA, LIGHT_SENSOR_SCL);
+  pinMode(LED_PIN, OUTPUT);
   analogReference(EXTERNAL);
-
-  StaticJsonDocument<500> doc;
 
   lightMeter.begin();
   Serial.println('\n');
   Serial.println("Initializing SD cards");
 
-  const int chipSelect = 15; // Select pin D8
-  if (!SD.begin(chipSelect))
+  if (!SD.begin(SD_DATA_PIN))
   {
     Serial.println("Error while initializing SD Card");
     return;
@@ -77,74 +81,28 @@ void setup()
   log("SD card initalized");
   log("Connecting to Wifi");
 
+  // Flashing LED iwhile waiting for successful WIFI connection
   WiFi.begin(ssid, password);
   int i = 0;
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(1000);
-    if (i % 2 == 0)
-    {
-      digitalWrite(LED, LOW);
-    }
-    else
-    {
-      digitalWrite(LED, HIGH);
-    }
-    Serial.print(++i);
-    Serial.print(' ');
+    int state = (i % 2 == 0) ? LOW : HIGH;
+    digitalWrite(LED_PIN, state);
   }
 
   log("Connection established!");
   log("Pulling current time");
 
+  // set System time for Sensor logging
   if (WiFi.status() == WL_CONNECTED)
   {
-    HTTPClient http;
-    String serverPath = timeServer;
-    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-    client->setInsecure();
-    http.begin(*client, serverPath.c_str());
-    int httpResponseCode = http.GET();
-    if (httpResponseCode > 0)
-    {
-      Serial.print("HTTP Response code: ");
-      Serial.println(httpResponseCode);
-      String payload = http.getString();
-      DeserializationError error = deserializeJson(doc, payload);
-
-      if (error)
-      {
-        digitalWrite(LED, LOW);
-        log(F("deserializeJson() failed: "));
-        log(error.f_str());
-        return;
-      }
-
-      hours = doc["hour"];
-      minutes = doc["minute"];
-      seconds = doc["seconds"];
-      setTime = millis();
-      log("Time set: " + getTime());
-    }
-    else
-    {
-      Serial.print("Error code: ");
-      Serial.println(httpResponseCode);
-      digitalWrite(LED, LOW);
-    }
-    http.end();
+    pullCurrentTime();
   }
 
-  log("Setting up Wifi Monitor");
-  delay(10);
-  wifi_set_opmode(STATION_MODE); // Promiscuous works only with station mode
-  wifi_set_channel(channel);
-  delay(10);
-  wifi_promiscuous_enable(disable);
-  wifi_set_promiscuous_rx_cb(promisc_cb); // Set up promiscuous callback
-  delay(10);
-  wifi_promiscuous_enable(enable);
-  digitalWrite(LED, HIGH);
+  log("Begin Wifi Callbacks");
+  beginWifiCallback();
+  digitalWrite(LED_PIN, HIGH);
 }
 
 void loop()
@@ -153,52 +111,57 @@ void loop()
   wifi_set_channel(channel);
   while (true)
   {
-    nothing_new++; // Array is not finite, check bounds and adjust if required
-    if (nothing_new > 200)
-    { // monitor channel for 200 ms
-      nothing_new = 0;
+    no_new_device++;
+    // monitor channel for 200 increments
+    if (no_new_device > 200)
+    {
+      no_new_device = 0;
       channel++;
+      // Only need to scan channels 1 to 14
       if (channel == 15)
-        break; // Only scan channels 1 to 14
+        break;
       wifi_set_channel(channel);
     }
-    delay(1); // critical processing timeslice for NONOS SDK! No delay(0) yield()
 
+    // Write sensor data once samplerate is reached
     if (millis() - lastSampleTime >= SAMPLERATE)
     {
       float db = measureSound();
       float lux = lightMeter.readLightLevel();
-      writeData(outputDevices() + "," + String(lux) + "," + String(db));
+      writeData(
+          String(deviceCount[0]) + "," +
+          String(deviceCount[1]) + "," +
+          String(deviceCount[2]) + "," +
+          String(lux) + "," +
+          String(db));
       log("wrote data");
-      lastSampleTime = millis();
-    }
-    if (millis() % 5000 == 0)
-    {
-      digitalWrite(LED, LOW);
-      lastLEDon = millis();
-    }
-    if (millis() == lastLEDon + 100)
-    {
-      digitalWrite(LED, HIGH);
+      lastSampleTime = millis() - (millis() - lastSampleTime);
     }
   }
-  purgeDevice();
+
+  // remove devices that have not been acquired for longer time
+  purgeDevices();
+
+  // critical processing timeslice for NONOS SDK! No delay(0) yield()
+  delay(1);
 }
 
 String getTime()
 {
+  // assumes no date passage (should be expanded)
   unsigned long timePassed = millis() - setTime;
-
   unsigned long secondsadded = timePassed / 1000 + seconds;
   unsigned long minutesadded = secondsadded / 60 + minutes;
   unsigned long hoursadded = minutesadded / 60 + hours;
-  // unsigned long daysadded = hoursadded / 24;
+
   timePassed %= 1000;
   secondsadded %= 60;
   minutesadded %= 60;
   hoursadded %= 24;
 
-  String out = String(hoursadded) + ":" + String(minutesadded) + ":" + String(secondsadded);
+  String out = String(hoursadded) + ":" +
+               String(minutesadded) + ":" +
+               String(secondsadded);
   return out;
 }
 
@@ -211,7 +174,9 @@ void log(String text)
 
 void writeData(String text)
 {
+  // prefix with time and encryt
   const String dataText = getTime() + "," + text;
+  // TODO: add encryption call here
   writeToSD("data.txt", dataText);
 }
 
@@ -229,11 +194,11 @@ void writeToSD(String filePath, String text)
   }
 }
 
-void purgeDevice()
+void purgeDevices()
 {
   for (int u = 0; u < clients_known_count; u++)
   {
-    if ((millis() - clients_known[u].lastDiscoveredTime) > PURGETIME)
+    if ((millis() - clients_known[u].lastDiscoveredTime) > DEVICEPURGETIME)
     {
       for (int i = u; i < clients_known_count; i++)
         memcpy(&clients_known[i], &clients_known[i + 1], sizeof(clients_known[i]));
@@ -243,29 +208,26 @@ void purgeDevice()
   }
 }
 
-String outputDevices()
+void countDevices()
 {
-  int strong = 0;
-  int medium = 0;
-  int weak = 0;
-  // show Clients
+  deviceCount[0] = 0;
+  deviceCount[1] = 0;
+  deviceCount[2] = 0;
   for (int u = 0; u < clients_known_count; u++)
   {
     if (clients_known[u].rssi >= -50)
     {
-      strong++;
+      deviceCount[0]++;
     }
     else if (clients_known[u].rssi >= -70)
     {
-      medium++;
+      deviceCount[1]++;
     }
     else
     {
-      weak++;
+      deviceCount[2]++;
     }
   }
-  String out = String(strong) + "," + String(medium) + "," + String(weak);
-  return out;
 }
 
 float measureSound()
@@ -273,12 +235,13 @@ float measureSound()
   maxVoltage = 0;
   minVoltage = ADC_RESOLUTION;
   soundSampleStart = millis();
-  while (millis() - soundSampleStart <= soundmeasurementInterval)
+
+  while (millis() - soundSampleStart <= SOUNDMEASUREINTERVAl)
   {
     // Read the analog input value
     int analogValue = analogRead(AUDIO_SENSOR_PIN);
 
-    // Update the peak-to-peak voltage
+    // Update peak voltages
     if (analogValue > maxVoltage)
     {
       maxVoltage = analogValue;
@@ -289,13 +252,58 @@ float measureSound()
       minVoltage = analogValue;
     }
   }
-  // Check if the measurement interval has elapsed
 
   // Calculate the peak-to-peak voltage
   float peakToPeakVoltage = (maxVoltage - minVoltage) * Vref / ADC_RESOLUTION;
 
-  // Calculate the decibel value using the peak-to-peak voltage
-  float dB = 20 * log10(peakToPeakVoltage / Vref) + calibrationValue;
-
+  // Calculate the decibel value using the peak-to-peak voltage and calibration offset
+  float dB = 20 * log10(peakToPeakVoltage / Vref) + soundCalibration;
   return dB;
+}
+
+void pullCurrentTime()
+{
+  client->setInsecure();
+  http.begin(*client, timeServer.c_str());
+  int httpResponseCode = http.GET();
+
+  if (httpResponseCode > 0)
+  {
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    String payload = http.getString();
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error)
+    {
+      digitalWrite(LED_PIN, LOW);
+      log(F("deserializeJson() failed: "));
+      log(error.f_str());
+      return;
+    }
+
+    hours = doc["hour"];
+    minutes = doc["minute"];
+    seconds = doc["seconds"];
+    setTime = millis();
+    log("Time set: " + getTime());
+  }
+  else
+  {
+    Serial.print("Error code: ");
+    Serial.println(httpResponseCode);
+    digitalWrite(LED_PIN, LOW);
+  }
+  http.end();
+}
+
+void beginWifiCallback()
+{
+  delay(10);
+  wifi_set_opmode(STATION_MODE); // Promiscuous works only with station mode
+  wifi_set_channel(channel);
+  delay(10);
+  wifi_promiscuous_enable(disable);
+  wifi_set_promiscuous_rx_cb(promisc_cb); // Set up promiscuous callback
+  delay(10);
+  wifi_promiscuous_enable(enable);
 }

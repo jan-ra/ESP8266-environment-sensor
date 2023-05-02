@@ -55,7 +55,6 @@ struct clientinfo parse_probe(uint8_t *frame, uint16_t framelen, signed rssi)
     struct clientinfo pi;
     pi.err = 0;
     pi.rssi = rssi;
-    struct packetBuffer *packet = (struct packetBuffer *)frame;
     memcpy(pi.station, frame + 10, ETH_MAC_LEN);
     return pi;
 }
