@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include "./wifi_structures.h"
 extern "C"
 {
 #include "user_interface.h"
@@ -8,18 +10,15 @@ extern "C"
     int wifi_send_pkt_freedom(uint8 *buf, int len, bool sys_seq);
 }
 
-#include <ESP8266WiFi.h>
-#include "./structures.h"
-
 #define MAX_CLIENTS_TRACKED 200
 #define TYPE_MANAGEMENT 0x00
 #define TYPE_CONTROL 0x01
 #define TYPE_DATA 0x02
 #define SUBTYPE_PROBE_REQUEST 0x04
 
-int nothing_new = 0;
-clientinfo clients_known[MAX_CLIENTS_TRACKED];
+int no_new_device = 0;
 int clients_known_count = 0;
+clientinfo clients_known[MAX_CLIENTS_TRACKED];
 
 String formatMac1(uint8_t mac[ETH_MAC_LEN])
 {
@@ -88,7 +87,7 @@ void promisc_cb(uint8_t *buf, uint16_t len)
             struct clientinfo ci = parse_probe(snifferPacket->buf, 36, snifferPacket->rx_ctrl.rssi);
             if (register_client(ci) == 0)
             {
-                nothing_new = 0;
+                no_new_device = 0;
             }
         }
     }

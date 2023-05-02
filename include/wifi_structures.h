@@ -1,5 +1,4 @@
 #include <Arduino.h>
-// This-->tab == "structures.h"
 #define ETH_MAC_LEN 6
 
 uint8_t broadcast1[3] = {0x01, 0x00, 0x5e};
@@ -55,7 +54,6 @@ struct clientinfo parse_probe(uint8_t *frame, uint16_t framelen, signed rssi)
     struct clientinfo pi;
     pi.err = 0;
     pi.rssi = rssi;
-    struct packetBuffer *packet = (struct packetBuffer *)frame;
     memcpy(pi.station, frame + 10, ETH_MAC_LEN);
     return pi;
 }
