@@ -56,11 +56,13 @@ float measureSound();
 void setup()
 {
   Serial.begin(115200);
-  Wire.begin(D2, D1);
 
-  StaticJsonDocument<500> doc;
+  Wire.begin(D2, D1);
   pinMode(LED, OUTPUT);
   analogReference(EXTERNAL);
+
+  StaticJsonDocument<500> doc;
+
   lightMeter.begin();
   Serial.println('\n');
   Serial.println("Initializing SD cards");
@@ -93,10 +95,8 @@ void setup()
   }
 
   log("Connection established!");
-  Serial.print("IP address:\t");
-  Serial.println(WiFi.localIP());
-
   log("Pulling current time");
+
   if (WiFi.status() == WL_CONNECTED)
   {
     HTTPClient http;
