@@ -52,7 +52,6 @@ int register_client(clientinfo &ci)
 
     if (!known)
     {
-        Serial.println("new client registered");
         ci.lastDiscoveredTime = millis();
         memcpy(&clients_known[clients_known_count], &ci, sizeof(ci));
         clients_known_count++;
@@ -66,24 +65,6 @@ int register_client(clientinfo &ci)
     }
 
     return known;
-}
-
-String print_client(clientinfo ci)
-{
-    String hi = "";
-    int u = 0;
-    int known = 0; // Clear known flag
-    if (ci.err != 0)
-    {
-        // nothing
-    }
-    else
-    {
-        Serial.printf("CLIENT: ");
-        Serial.print(formatMac1(ci.station)); // Mac of device
-        Serial.printf("   % 4d\r\n", ci.rssi);
-    }
-    return hi;
 }
 
 void promisc_cb(uint8_t *buf, uint16_t len)
@@ -107,7 +88,6 @@ void promisc_cb(uint8_t *buf, uint16_t len)
             struct clientinfo ci = parse_probe(snifferPacket->buf, 36, snifferPacket->rx_ctrl.rssi);
             if (register_client(ci) == 0)
             {
-                print_client(ci);
                 nothing_new = 0;
             }
         }
