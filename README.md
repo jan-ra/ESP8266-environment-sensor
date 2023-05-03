@@ -29,8 +29,12 @@ This ESP8266 Sensor project was developed as part of a Master thesis at the Digi
 1. Install [PlatformIO](https://platformio.org/) for [VSCode](https://code.visualstudio.com/).
 2. Install the [PlatformIO extension](https://marketplace.visualstudio.com/items?itemName=platformio.platformio-ide) for VSCode.
 3. Clone the repository.
-4. Create a copy of the `credentials_template.h` file named `credentials.h` and fill in the WiFi SSID and password.
-5. Deploy the code to the Sensor setup and collect data.
+4. Create a copy of the `credentials_template.h` file named `credentials.h` and fill in the WiFi SSID and password. Also set a ecryption key here (The key need to be 16 bytes long). Same goes for the iv.
+5. Create a copy of the `config_template.py` file named `config.py` and fill in the same key and iv.
+6. If needed install python 3 and then add the pycryptodome package via pip. `pip install pycryptodome`
+7. Deploy the code to the Sensor setup and collect data.
+8. add the created `data.txt` on the sd card to the decrypt folder and run `py decrypt.py`.
+9. You now have your sensor data in the file `out.txt`.
 
 ## Usage
 
