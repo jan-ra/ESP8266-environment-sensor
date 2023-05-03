@@ -6,10 +6,15 @@ import config
 b = bytearray()
 b.extend(map(ord, config.keystr))
 key = b
-cipher = AES.new(key, AES.MODE_CBC, config.iv)
 
-base64_str = "PlO2DwRAoeM/XCu0Yr4ODknDbWo5qMwVKZ6rSzF9mwNgorlTgEo7jf++U0xAtCgKgmpDFDyy2mGWZfUes53fNg=="
-ct_bytes = base64.b64decode(base64_str)
-pt_bytes = cipher.decrypt(ct_bytes)
-pt = pt_bytes.decode()
-print(f"Decoded text: {pt}")
+with open('data.txt', 'r') as f:
+    lines = f.readlines()
+
+with open('out.csv', 'w') as f:
+    for line in lines:
+        cipher = AES.new(key, AES.MODE_CBC, config.iv)
+        base64_str = line.strip()
+        ct_bytes = base64.b64decode(base64_str)
+        pt_bytes = cipher.decrypt(ct_bytes)
+        pt = pt_bytes.decode().rstrip('X')
+        f.write(f"{pt}\n")
