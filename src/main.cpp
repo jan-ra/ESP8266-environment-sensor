@@ -7,7 +7,6 @@
 #include <Wire.h>
 #include <BH1750.h>
 #include <AES.h>
-#include <AES.cpp>
 #include <credentials.h>
 #include <wifi_functions.h>
 #include <base64.h>
@@ -139,7 +138,7 @@ void loop()
           String(lux) + "," +
           String(db));
       log("wrote data");
-      lastSampleTime = millis() - (millis() - lastSampleTime);
+      lastSampleTime = lastSampleTime + SAMPLERATE;
     }
   }
 
@@ -270,6 +269,7 @@ float measureSound()
 void pullCurrentTime()
 {
   client->setInsecure();
+  client->setBufferSizes(512, 512);
   http.begin(*client, timeServer.c_str());
   int httpResponseCode = http.GET();
 
