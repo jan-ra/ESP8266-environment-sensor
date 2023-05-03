@@ -57,3 +57,23 @@ The following things could easily be changed for another application:
 - Device grouping boundaries.
 - Sound sample interval
 - General sampling interval
+
+## References
+
+### Aes
+
+- https://github.com/intrbiz/arduino-crypto/issues/27
+- https://github.com/SergeyBel/AES
+
+### Probe Request Counting
+
+- https://github.com/kalanda/esp8266-sniffer
+- https://github.com/SensorsIot/Wi-Fi-Sniffer-as-a-Human-detector
+
+### Light Sensor
+
+- https://randomnerdtutorials.com/esp8266-nodemcu-bh1750-ambient-light-sensor/
+
+### Sound Sensor and dB calculation
+
+- https://forums.adafruit.com/viewtopic.php?t=94374
