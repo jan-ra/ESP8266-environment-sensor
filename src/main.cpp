@@ -6,8 +6,11 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <BH1750.h>
-#include "./credentials.h"
-#include "./wifi_functions.h"
+#include <AES.h>
+#include <AES.cpp>
+#include <credentials.h>
+#include <wifi_functions.h>
+#include <base64.h>
 
 #define disable 0
 #define enable 1
@@ -51,12 +54,13 @@ std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure)
 // FUNCTIONS (inital listing needed for platformIO conversion for ESP8266)
 String getTime();
 String outputDevices();
+String encrypt(unsigned char plain[], int size);
+float measureSound();
 void log(String text);
 void writeToSD(String filePath, String text);
 void showDevices();
 void writeData(String text);
 void purgeDevices();
-float measureSound();
 void beginWifiCallback();
 void pullCurrentTime();
 
@@ -175,9 +179,11 @@ void log(String text)
 void writeData(String text)
 {
   // prefix with time and encryt
-  const String dataText = getTime() + "," + text;
-  // TODO: add encryption call here
-  writeToSD("data.txt", dataText);
+  String dataText = getTime() + "," + text;
+  int size = dataText.length();
+  unsigned char *plain = (unsigned char *)dataText.c_str();
+  String encText = encrypt(plain, size);
+  writeToSD("data.txt", encText);
 }
 
 void writeToSD(String filePath, String text)
@@ -306,4 +312,22 @@ void beginWifiCallback()
   wifi_set_promiscuous_rx_cb(promisc_cb); // Set up promiscuous callback
   delay(10);
   wifi_promiscuous_enable(enable);
+}
+
+String encrypt(unsigned char plain[], int size)
+{
+  int remainder = size % 16;
+  int padding = (remainder == 0) ? 0 : (16 - remainder);
+  for (int i = 0; i < padding; i++)
+  {
+    plain[size + i] = 'X';
+  }
+  size += padding;
+
+  AES aes(AESKeyLength::AES_128);
+  unsigned int plainLen = size * sizeof(unsigned char); // bytes in plaintext
+  unsigned int outLen = size;                           // out param - bytes in сiphertext
+  unsigned char *e = aes.EncryptCBC(plain, plainLen, key, iv);
+  String base64String = base64::encode(e, outLen);
+  return base64String;
 }
